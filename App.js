@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { FlatList, StyleSheet, View, Alert } from "react-native";
+import { FlatList, StyleSheet, View } from "react-native";
 import {
   Appbar,
   Button,
@@ -10,22 +10,13 @@ import {
   MD3LightTheme as DefaultTheme,
 } from "react-native-paper";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import Geolocation from "@react-native-community/geolocation";
-import SQLite from "react-native-sqlite-storage";
-import myColors from "./assets/colors.json";r
+import myColors from "./assets/colors.json";
 import myColorsDark from "./assets/colorsDark.json";
+import { insertLocation, getAllLocations } from "./db";
+import { v4 as uuidv4 } from 'uuid';
+import * as Location from 'expo-location';
+import 'react-native-get-random-values';
 
-// Configurações do banco de dados
-const db = SQLite.openDatabase(
-  {
-    name: "LocationsDB",
-    location: "default",
-  },
-  () => {},
-  error => {
-    console.log("Error opening database", error);
-  }
-);
 
 export default function App() {
   const [isSwitchOn, setIsSwitchOn] = useState(false);
@@ -38,7 +29,6 @@ export default function App() {
     colors: myColors.colors,
   });
 
-  // Carrega o estado do darkMode do AsyncStorage
   async function loadDarkMode() {
     try {
       const darkModeValue = await AsyncStorage.getItem("darkMode");
@@ -50,7 +40,6 @@ export default function App() {
     }
   }
 
-  // Evento do switch de darkMode
   async function onToggleSwitch() {
     try {
       const newSwitchState = !isSwitchOn;
@@ -61,77 +50,33 @@ export default function App() {
     }
   }
 
-  // Configuração inicial do banco de dados
-  function initializeDatabase() {
-    db.transaction(tx => {
-      tx.executeSql(
-        `CREATE TABLE IF NOT EXISTS locations (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          latitude REAL,
-          longitude REAL
-        );`
-      );
-    });
-  }
-
-  // Captura e salva a localização do dispositivo
   async function getLocation() {
     setIsLoading(true);
-    Geolocation.getCurrentPosition(
-      position => {
-        const { latitude, longitude } = position.coords;
-        saveLocation(latitude, longitude);
-        setIsLoading(false);
-      },
-      error => {
-        console.error("Failed to get location", error);
-        setIsLoading(false);
-        Alert.alert("Erro", "Não foi possível obter a localização.");
-      },
-      { enableHighAccuracy: true, timeout: 20000, maximumAge: 1000 }
-    );
+    const { status } = await Location.requestForegroundPermissionsAsync();
+
+    if (status === "granted") {
+      const { coords } = await Location.getCurrentPositionAsync({});
+      const location = { 
+        ...coords,
+        id: uuidv4()
+      };
+      await insertLocation(location);
+      console.log(location);
+      setLocations(prevLocations => [...prevLocations, location]);
+    }
+    setIsLoading(false);
   }
 
-  // Salva a localização no banco de dados SQLite
-  function saveLocation(latitude, longitude) {
-    db.transaction(tx => {
-      tx.executeSql(
-        "INSERT INTO locations (latitude, longitude) VALUES (?, ?);",
-        [latitude, longitude],
-        (_, result) => {
-          console.log("Location saved with id:", result.insertId);
-          loadLocations(); // Atualiza a lista de localizações após salvar
-        },
-        error => {
-          console.error("Failed to save location", error);
-        }
-      );
-    });
+
+  async function loadLocations() {
   }
 
-  // Carrega as localizações do banco de dados SQLite
-  function loadLocations() {
-    setIsLoading(true);
-    db.transaction(tx => {
-      tx.executeSql("SELECT * FROM locations;", [], (_, { rows }) => {
-        let locationsList = [];
-        for (let i = 0; i < rows.length; i++) {
-          locationsList.push(rows.item(i));
-        }
-        setLocations(locationsList);
-        setIsLoading(false);
-      });
-    });
-  }
 
-  // UseEffect para configurar o banco de dados e carregar o darkMode e localizações salvas
   useEffect(() => {
-    initializeDatabase();
     loadDarkMode();
     loadLocations();
   }, []);
 
-  // Atualiza o tema quando o isSwitchOn é alterado
   useEffect(() => {
     setTheme({ ...theme, colors: isSwitchOn ? myColorsDark.colors : myColors.colors });
   }, [isSwitchOn]);
@@ -151,7 +96,7 @@ export default function App() {
           icon="map"
           mode="contained"
           loading={isLoading}
-          onPress={getLocation}
+          onPress={() => getLocation()}
         >
           Capturar localização
         </Button>
